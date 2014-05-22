@@ -1,7 +1,7 @@
 SickAdd
 =======
 
-A Python tool to automatically add your TVDB favorites into Sickbeard
+A Python tool to automatically add your IMDB and/or TVDB favorites into Sickbeard
 
 
 I've always been  a big fan of being able to add movie to CouchPotato sraight from my IMDB watchlist, and always dreamed to do the same with Sickbeard... Well, this is exactely what SickAdd has been designed for :)

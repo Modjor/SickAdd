@@ -1,7 +1,7 @@
 SickAdd
 =======
 
-A Python tool to automatically add your IMDB and/or TVDB favorites into Sickbeard
+A Python tool to automatically add your IMDB and/or TVDB favorites into Sickbeard (or SickRage)
 
 
 I've always been  a big fan of being able to add movie to CouchPotato sraight from my IMDB watchlist, and always dreamed to do the same with Sickbeard... Well, this is exactely what SickAdd has been designed for :)
@@ -20,7 +20,7 @@ Usage/Configuration:
 - Set your TVDB Account ID and/or IMDB watchlist (RSS version!!)
 - Schedule a task to run this script every x hours (IE: using cron under linux)
 
-That's it, enjoy your TVDB/IMDB Favorites TV Show being automatically added to SickBeard using your SB default profile
+That's it, enjoy your TVDB/IMDB Favorites TV Shows being automatically retrieved and added to SickBeard using your SB default profile
 
 
 Release note:
@@ -33,4 +33,4 @@ I haven't test this script under Windows, but it should work correctly.
 RoadMap:
 - Support for IMDB - NOW SUPPORTED
 - Support for TVRage
-- Support for custom profile while adding show
+- Support for SB custom profile while adding show

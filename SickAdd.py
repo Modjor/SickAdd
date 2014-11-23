@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #
 ##################################################################################
-### SickAdd V. 2  - THIS IS AN ALPHA RELEASE
+### SickAdd V2  - THIS IS AN ALPHA RELEASE
 #
 # This script downloads your TVDB favorites and add them to your SickBeard shows
 #
@@ -9,12 +9,14 @@
 #
 #
 # Changelog
+# Version 2.1
+# Minor Bug correction around TVDB url / IMDB mapping)
+#
 # Version 2
 # - Add IMDB Watch list support (using IMDB Mapping from TVDB)
 # - Add a Debug mode so it's a bit less verbose in standard mode
 #
 ##################################################################################
-
 
 
 ### OPTIONS
@@ -35,17 +37,17 @@ webroot = ""
 
 #TVDB Configuration
 tvdb_accountid= "your_tvdb_account_id"
-tvdb_enabled = 0
+tvdb_api_url = "http://thetvdb.com/api"
+tvdb_enabled = 0 #set to 1 to enable TVDB Favorites, 0 to disable
 
 # IMDB Configuration
-imdb_watchlist_rss_url = "path_to_imdb_watchlist_rss"
-imdb_enabled = 0
+imdb_watchlist_rss_url = "http://rss.imdb.com/user/ur1234567/watchlist"  #(Path to RSS Watchlist)
+imdb_enabled = 0 #set to 1 to enable IMDB Watchlist, 0 to disable
 
 
 
 # Advanced Settings
 debug = 0
-
 
 
 #########    NO MODIFICATION UNDER THAT LINE
@@ -402,3 +404,4 @@ def startup():
 	AddToSickbeard()	
 
 startup()
+

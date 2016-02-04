@@ -30,7 +30,6 @@ However be carfeull if your using TVRage as indexer, since SickAdd only supports
 I haven't test this script under Windows, but it should work correctly.
 
 
-RoadMap:
-- Support for IMDB - NOW SUPPORTED
-- Support for TVRage
-- Support for SB custom profile while adding show
+Notes:
+You need Python with Lxml module to run this tool.
+On Synology, you need to install packages Python 2.x and Python Modules (which contains lxml)

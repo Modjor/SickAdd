@@ -1,14 +1,18 @@
 #!/usr/bin/env python
 #
 ##################################################################################
-### SickAdd V2  - THIS IS AN ALPHA RELEASE
+### SickAdd V3  - THIS IS AN ALPHA RELEASE
 #
-# This script downloads your TVDB favorites and add them to your SickBeard shows
+# This script downloads your IMDB favorites and add them to your SickBeard shows
 #
 # NOTE: This script requires Python to be installed on your system
 #
 #
 # Changelog
+#Version 3.0
+# Full rewrite, now supports multiple imdb watchlist to be monitored, various command line argument including browsing &
+# deleting items from the sqlite db
+#
 # Version 2.1
 # Minor Bug correction around TVDB url / IMDB mapping)
 #
@@ -19,389 +23,293 @@
 ##################################################################################
 
 
-### OPTIONS
-
-## General
-
-# SickAdd settings
-db_name = "sickadd.db"
-install_path = "/volume1/Scripts/SickAdd" #directory where sickadd.db will be created
-
-
-# Sickbeard configuration
-sickbeard_host = "127.0.0.1"
-sickbeard_port = "8083"
-sickbeard_api = "your_api_key"
-webroot = ""
-
-
-#TVDB Configuration
-tvdb_accountid= "your_tvdb_account_id"
-tvdb_api_url = "http://thetvdb.com/api"
-tvdb_enabled = 0 #set to 1 to enable TVDB Favorites, 0 to disable
-
-# IMDB Configuration
-imdb_watchlist_rss_url = "http://rss.imdb.com/user/ur1234567/watchlist"  #(Path to RSS Watchlist)
-imdb_enabled = 0 #set to 1 to enable IMDB Watchlist, 0 to disable
-
-
-
-# Advanced Settings
-debug = 0
-
+# Settings
+settings = {
+    "watchlist_urls": [
+        "https://www.imdb.com/list/lsxxxxxxxx", "https://www.imdb.com/list/lsxxxxxxxxxx"
+    ],
+    "sickchill_url": "http://sickchill_ip:8081",
+    "sickchill_api_key": "your_sickchill_api_key",
+    "debug": 1,
+}
 
 #########    NO MODIFICATION UNDER THAT LINE
 ##########################################################
 
-
-### BEGIN OF SCRIPT
 import sys
-import urllib2
+import argparse
 import sqlite3
-import os.path
+import requests
+from bs4 import BeautifulSoup
 import json
-from lxml import etree
-from StringIO import StringIO
-import shutil
-
-
-db_version_must_be = 2
-sickadd_db = install_path + "/" + db_name
-sickbeard_api_url = "http://" + sickbeard_host + ":" + sickbeard_port + "/api/" + sickbeard_api
-
-	
-## Database creation
-def db_creation():
-	print "Creating database file: " + sickadd_db 
-	conn = sqlite3.connect(sickadd_db)
-	c = conn.cursor()
-	c.execute ('''CREATE TABLE tvdb_fav (tvdb_id INTEGER PRIMARY KEY, tvdb_name text, state INTEGER DEFAULT '0')''')
-	c.execute ('''CREATE TABLE info (db_version num)''')
-	c.execute ("INSERT INTO info VALUES (1)")
-	conn.commit()
-	conn.close()
-	print "Database has been created"
-	db_check()
+# import re
+# import os
+from datetime import datetime
 
 
 
-##############################   DATABASE OPERATIONS  ############################
+# Debug function
+def debug_log(message):
+    if settings["debug"]:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{timestamp}] {message}")
+        with open("debug.log", "a") as log_file:
+            log_file.write(f"[{timestamp}] {message}\n")
 
-## DB Check - checks if db exists or if needs to be upgraded
-def db_check():
-	print "Initializing database " + sickadd_db
-	if not os.path.isfile(sickadd_db):
-		print ("database does NOT exist")
-		db_creation()
-		
-	else:
-		if debug == 1:
-			print db_name + " found. Checking Database version"
-		conn = sqlite3.connect(sickadd_db)
-		c = conn.cursor()
-		c.execute ("SELECT db_version FROM info WHERE db_version NOT NULL")
-		result_set = c.fetchall()
-		value =  result_set[0]
-		current_db_version = str(value[0])
-		
-		if debug == 1:
-			print "Current Database version is: " + current_db_version
-			print "Database version must be: " + str(db_version_must_be)
-			
-		if int(current_db_version) > db_version_must_be:
-			print "Your database file version greater than what this version of SickAdd can support"
-			print "Please upgrade SickAdd or delete your DB file"
-			print "Exiting..."
-			conn.close()
-			sys.exit()
-			
-		if int(current_db_version) == db_version_must_be:
-			if debug == 1:
-				print "Your database is using current schema. No need for update"
-			conn.close()
-		else:
-			print "Your database scheme has to be upgraded"
-			conn.close()
-			db_upgrade(current_db_version)
-	
-	
+# Check if IMDB Watchlists are reachable
+def check_watchlists():
+    # Create a list to store unreachable watchlists
+    unreachable_watchlists = []
 
+    # Create a list to store reachable watchlists
+    reachable_watchlists = []
 
+    for url in settings["watchlist_urls"]:
+        response = requests.get(url)
+        if response.status_code == 200:
+            reachable_watchlists.append(url)
+        else:
+            unreachable_watchlists.append(url)
 
-## DB Upgrade. Used if current DB file has to be upgraded to match current SickAdd version	
-def db_upgrade(current_db_version):	
-	conn = sqlite3.connect(sickadd_db)
-	c = conn.cursor()	
-	if 	int(current_db_version) == 1:
-#	UPGRADE TO VERSION 2 ANY DB IN VERSION 1
-		db_bck = (sickadd_db + "_v1")		
-		if debug == 1:
-			print "Backing up database file as: "  + db_bck
-			print "Upgrading database to version 2..."
-		shutil.copyfile(sickadd_db, db_bck)
-		c.execute ("CREATE TABLE imdb_fav (imdb_id text PRIMARY KEY, imdb_name text, tvdb_id INTEGER)")
-		c.execute ("UPDATE info SET db_version = 2 WHERE db_version = 1")
-		conn.commit()
-		c.execute ("SELECT db_version FROM info WHERE db_version NOT NULL")
-		result_set = c.fetchall()
-		value =  result_set[0]
-		current_db_version = value[0]
-		conn.close()
-		if debug == 1:
-			print "DB should be now in version "+ str(current_db_version)
-		if current_db_version == 2:
-			if debug == 1:
-				print "Your database has been upgraded to version 2"
-			db_check()
-		else:
-			print "Database is NOT in version 2"
-			print "Error during database upgrade. Exiting..."
-			sys.exit()
-			
-			
-		
+    # Log unreachable watchlists in debug mode
+    if unreachable_watchlists:
+        debug_log(f"Unreachable IMDb watchlists: {', '.join(unreachable_watchlists)}")
+
+    # Log reachable watchlists in debug mode
+    if reachable_watchlists:
+        debug_log(f"Reachable IMDb watchlists: {', '.join(reachable_watchlists)}")
+
+    # Check if the count of reachable watchlists is 0. If so, stop the script.
+    if len(reachable_watchlists) == 0:
+        print("Error: None of the IMDb watchlists are reachable.")
+        sys.exit(1)
+
+    debug_log("IMDb watchlists check completed.")
+
+# Check if SickChill is reachable
+def check_sickchill():
+    url = f"{settings['sickchill_url']}/api/{settings['sickchill_api_key']}/?cmd=shows"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print("Error: SickChill is not reachable.")
+        sys.exit(1)
+    debug_log("SickChill is reachable.")
 
 
-
-		
-##############################  TVDB FAVORITES PROCESSING  ############################		
-
-## TVDB processing -  download TVDB favorites and add them to SickAdd db
-def tvdb_processing():
-#	Get the favorites from TVDB.com
-	if debug == 1:
-		print ("Retrieving TVDB Favorites for Account ID: " + tvdb_accountid)
-	tvdb_fav_url =  tvdb_api_url + "/User_Favorites.php?accountid=" + tvdb_accountid
-	response = urllib2.urlopen(tvdb_fav_url)
-	tvdb_xml = response.read()
-	response.close()
-	if '</Favorites>' not in tvdb_xml:
-		print ("There was wan error grabbing TVDB favorites")
-		print (tvdb_fav_url)
-		sys.exit()
-#	Parse the XML result and add the favorites to the sickadd database
-	print ("Favorites downloaded. Parsing into database...")
-	conn = sqlite3.connect(sickadd_db)
-	c = conn.cursor()
-	tree = etree.parse(StringIO(tvdb_xml))
-	for Favorites in tree.xpath("/Favorites/Series"):
-		if debug == 1:
-			print "Adding show TVDB ID: " + Favorites.text
-		FavoritesInt = int(Favorites.text)
-		c.execute ("INSERT OR IGNORE INTO tvdb_fav VALUES (?,?,?)", (FavoritesInt, "", 0))
-		conn.commit()
-	print "XML Import Done"
-	conn.close()
-
-	
+# Check if TheTVDB is reachable
+def check_thetvdb():
+    url = "https://thetvdb.com/api/GetSeriesByRemoteID.php?imdbid=tt0257315"
+    debug_log("Testing TheTVDB availability at URL: " + url)
+    response = requests.get(url)
+    if response.status_code != 200:
+        debug_log("Error during TheTVDB availability test at URL: " + url)
+        debug_log("Response: " + str(response.status_code) + " - " + response.text)
+        print("Error: TheTVDB is not reachable.")
+        sys.exit(1)
+    else:
+        debug_log("TheTVDB is reachable.")
+  
 
 
-	
-##############################  IMDB FAVORITES PROCESSING  ############################	
-	
-## IMDB Processing: Download IMDB RSS whatchlist and store the IMDB_ID and IMDB_Title in the imdb_fav table
-# Download IMDB watchlist and add it to local SickAdd DB 
-def imdb_processing(imdb_watchlist_rss_url):
-#	Get the watchlist from imdb.com
-	imdb_http_status = urllib2.urlopen("http://www.imdb.com").getcode()
-	if imdb_http_status != 200:
-		print "IMDB cannot be contacted. Cancelling IMDB processing"
-		return
-	if debug == 1:
-		print ("Retrieving IMDB watchlist from:")
-		print imdb_watchlist_rss_url
-	response = urllib2.urlopen(imdb_watchlist_rss_url)
-	imdb_rss = response.read()
-	response.close()
-#	Parse the IMDB RSS result from the web response and only add the IMDB TV series to the sickadd database
-	if debug == 1:
-		print "Adding new IMDB IDs to SickAdd database"
-	conn = sqlite3.connect(sickadd_db)
-	c = conn.cursor()
-	tree = etree.parse(StringIO(imdb_rss))
-	for item in tree.iter('item'):
-		imdb_title = item[1].text
-		imdb_link = item[2].text
-		imdb_guid = item[3].text
-		imdb_id = (imdb_guid[-10:])[:9]
-		if debug == 1:
-			print "Title: " + imdb_title
-			print "Link: " + imdb_link
-			print "GUID: " + imdb_guid
-			print "IMDB ID from GUID: " + imdb_id
-		if ("TV Series" in imdb_title) or ("Mini-Series" in imdb_title):
-			if debug == 1:
-				print imdb_title, "seems to be a TV show"
-				print "Adding (if does not already exist)", imdb_title, "to IMDB Favorites"
-			c.execute ("INSERT OR IGNORE INTO imdb_fav VALUES (?,?,?)", (imdb_id, imdb_title, None))
-			conn.commit()
-	if debug == 1:
-		print "End of IMDB watch list Import"
-	conn.close()
-	imdbid_to_tvdbid()
+# Create or connect to SQLite database
+def setup_database():
+    conn = sqlite3.connect("sickadd.db")
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS shows (
+            imdb_id TEXT PRIMARY KEY,
+            title TEXT,
+            watchlist_url TEXT,
+            imdb_import_date TEXT,
+            added_to_sickchill INTEGER,
+            thetvdb_id INTEGER,
+            sc_added_date TEXT
+        )
+        """
+    )
+    conn.commit()
+    return conn, cur
+
+# Get IMDb watchlists and extract series
+def get_imdb_watchlist_series():
+    series_list = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+        "Accept-Language": "en-US"
+    }
+    for url in settings["watchlist_urls"]:
+        debug_log(f"Fetching IMDb watchlist: {url}")
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, "html.parser")
+        series_items = soup.find_all("div", class_="lister-item mode-detail")
+        debug_log(f"Number of series found in the watchlist: {len(series_items)}")
+        for item in series_items:
+            imdb_id = item.find("div", class_="ribbonize")["data-tconst"]
+            title = item.find("h3", class_="lister-item-header").find("a").text
+            imdb_url = f"https://www.imdb.com/title/{imdb_id}/"
+            imdb_response = requests.get(imdb_url, headers=headers)
+            imdb_soup = BeautifulSoup(imdb_response.text, "html.parser")
+            title_tag = imdb_soup.find("title")
+
+            if title_tag and "TV Series" in title_tag.text:
+                series_list.append({
+                    "imdb_id": imdb_id,
+                    "title": title,
+                    "watchlist_url": url,
+                })
+                debug_log(f"TV Series detected: {title} ({imdb_id})")
+            else:
+                debug_log(f"Ignored item (not a TV series): {title}")
+    debug_log(f"Total series fetched: {len(series_list)}")
+    return series_list
 
 
-## Looks at all IMDB_fav records without a valid TVDB ID and tries to find a match on TVDB:
-def imdbid_to_tvdbid():
-	tvdb_http_status = urllib2.urlopen("http://thetvdb.com").getcode()
-	if tvdb_http_status != 200:
-		print "TheTVDB cannot be contacted. Cancelling process 'IMDB ID TO TVDB ID'"
-		return
-	conn = sqlite3.connect(sickadd_db)
-	c = conn.cursor()
-# Select all records from imdb_fav table where tvdb_id is NULL	
-	c.execute ("SELECT imdb_id, imdb_name FROM imdb_fav WHERE tvdb_id is NULL")
-	result_set = c.fetchall()
-	for imdb_id_list in result_set:
-		imdb_id =  str(imdb_id_list[0])
-		imdb_name = imdb_id_list[1]
-		print "TV show", imdb_name, "does not have a valid TVDB ID. Trying to find one"
-		print "Attempting to match IMDB ID", imdb_id, "with TheTVDB"
- # 		Request TVDP API using IMDB ID of the show		
-		tvdb_imdbid_request_url = (tvdb_api_url + "/GetSeriesByRemoteID.php?imdbid=" + imdb_id)
-		if debug == 1:
-			print ("Retrieving IMDB Info from TVDB using:")
-			print tvdb_imdbid_request_url
-		response = urllib2.urlopen(tvdb_imdbid_request_url)
-		tvdb_show = etree.parse(StringIO(response.read()))
-# 		Checks if the answer from TVDB contains TVDB data or not		
-		tvdb_id_txt = tvdb_show.find('Series/seriesid')
-		if tvdb_id_txt is None: 
-			print "No record found on TVDB for", imdb_id, "-", imdb_name
-		else:
-# 		If data found, add the TVDB id to the IMDB table for the current IMDB record
-			tvdb_id = int((tvdb_id_txt).text)
-			print "TVDB ID value found for IMDB", imdb_id, ":", str(tvdb_id)
-			c.execute ('UPDATE imdb_fav SET tvdb_id = ? WHERE imdb_id = ? AND tvdb_id is NULL', (tvdb_id, imdb_id))
-			conn.commit()
+# Insert series into SQLite database
+def insert_series_to_db(conn, cur, series_list):
+    for series in series_list:
+        cur.execute("SELECT * FROM shows WHERE imdb_id=?", (series["imdb_id"],))
+        if not cur.fetchone():
+            cur.execute(
+                "INSERT INTO shows (imdb_id, title, watchlist_url, imdb_import_date, added_to_sickchill) VALUES (?, ?, ?, ?, ?)",
+                (series["imdb_id"], series["title"], series["watchlist_url"], datetime.now().strftime("%Y-%m-%d"), 0),
+            )
+            conn.commit()
+            debug_log(f'Series added to the database: {series["title"]} (IMDb ID: {series["imdb_id"]})')
 
-	conn.close()
-	imdb_table_to_tvdb_table()
+# Get TheTVDB ID for series in the database
+def get_thetvdb_ids(conn, cur):
+    cur.execute("SELECT imdb_id, title FROM shows WHERE thetvdb_id IS NULL")
+    series_without_thetvdb_id = cur.fetchall()
+    for imdb_id, title in series_without_thetvdb_id:
+        try:
+            url = f"https://thetvdb.com/api/GetSeriesByRemoteID.php?imdbid={imdb_id}"
+            debug_log(f"URL used to fetch TheTVDB ID for {title} (IMDb ID: {imdb_id}): {url}")
+            headers = {"User-Agent": "Mozilla/5.0"}
+            response = requests.get(url, headers=headers)
+            debug_log(f"TheTVDB response for {title} (IMDb ID: {imdb_id}): {response.status_code}")
+            if response.status_code != 200 or response.content.strip() == b'':
+                debug_log(f"Error fetching TheTVDB ID for {title} (IMDb ID: {imdb_id}): {response.status_code}")
+                continue
+            soup = BeautifulSoup(response.content, "lxml-xml")
+            series = soup.find("Series")
+            if series is None:
+                debug_log(f"No series found for IMDb ID {imdb_id}")
+                continue
+            tvdb_id = series.find("id").text
+            cur.execute("UPDATE shows SET thetvdb_id=? WHERE imdb_id=?", (tvdb_id, imdb_id))
+            conn.commit()
+            debug_log(f"TheTVDB ID added for {title} (IMDb ID: {imdb_id}, TheTVDB ID: {tvdb_id})")
+        except requests.exceptions.RequestException as e:
+            debug_log(f"Error fetching TheTVDB ID for {title} (IMDb ID: {imdb_id}): {e}")
 
-	
-	
-def imdb_table_to_tvdb_table():
-	conn = sqlite3.connect(sickadd_db)
-	c = conn.cursor()	
-	c.execute ("SELECT tvdb_id, imdb_name FROM imdb_fav WHERE tvdb_id is NOT NULL")
-	result_set = c.fetchall()
-	for imdb_fav_list in result_set:
-		tvdb_id =  int(imdb_fav_list[0])
-		imdb_name = ("IMDB - " + (imdb_fav_list[1]))
-		c.execute ("INSERT OR IGNORE INTO tvdb_fav VALUES (?,?,?)", (tvdb_id, imdb_name, 0))
-		conn.commit()
+# Get the list of TheTVDB IDs of shows already in SickChill
+def get_sickchill_shows():
+    url = f"{settings['sickchill_url']}/api/{settings['sickchill_api_key']}/?cmd=shows"
+    response = requests.get(url)
+    shows = response.json()["data"]
+    tvdb_ids = [int(show["tvdbid"]) for show in shows.values()]
+    return tvdb_ids
+
+# Update added_to_sickchill value in the database
+def update_added_to_sickchill(conn, cur, sickchill_tvdb_ids):
+    cur.execute("SELECT thetvdb_id FROM shows WHERE added_to_sickchill=0")
+    shows_to_check = cur.fetchall()
+    for show in shows_to_check:
+        if show[0] in sickchill_tvdb_ids:
+            cur.execute("UPDATE shows SET added_to_sickchill=1 WHERE thetvdb_id=?", (show[0],))
+            conn.commit()
+            debug_log(f"Updated added_to_sickchill value for the series (TheTVDB ID: {show[0]})")
+
+# Add series to SickChill
+def add_series_to_sickchill(conn, cur):
+    cur.execute("SELECT thetvdb_id, title FROM shows WHERE added_to_sickchill=0")
+    shows_to_add = cur.fetchall()
+    debug_log(f"{len(shows_to_add)} series to add to SickChill")
+    for show in shows_to_add:
+        thetvdb_id, title = show
+        debug_log(f"Attempting to add series to SickChill (TheTVDB ID: {thetvdb_id}, Title: {title})")
+        url = f"{settings['sickchill_url']}/api/{settings['sickchill_api_key']}/?cmd=show.addnew&indexerid={thetvdb_id}"
+        debug_log(f"URL called to add the series to SickChill: {url}")
+        response = requests.get(url)
+        if response.status_code == 200 and response.json()["result"] == "success":
+            cur.execute("UPDATE shows SET added_to_sickchill=1, sc_added_date=? WHERE thetvdb_id=?", (datetime.now().strftime("%Y-%m-%d"), thetvdb_id))
+            conn.commit()
+            debug_log(f"Series added to SickChill (TheTVDB ID: {thetvdb_id}, Title: {title})")
+        else:
+            debug_log(f"Unable to add series to SickChill (TheTVDB ID: {thetvdb_id}, Title: {title}) - Response code: {response.status_code}")
 
 
 
 
+# Show the SQLite database content
+def show_db_content(cursor):
+    cursor.execute("PRAGMA table_info(shows)")
+    columns = [column[1] for column in cursor.fetchall()]
+    cursor.execute("SELECT * FROM shows")
+    rows = cursor.fetchall()
+
+    # Print column names
+    column_names = "|".join(columns)
+    print(f"+{'-' * len(column_names.replace('|', ''))}+")
+    print(f"| {column_names} |")
+
+    # Print separator
+    print(f"+{'-' * len(column_names.replace('|', ''))}+")
+
+    # Print rows with field values
+    for row in rows:
+        row_values = "|".join([str(value) for value in row])
+        print(f"| {row_values} |")
+
+    # Print bottom separator
+    print(f"+{'-' * len(column_names.replace('|', ''))}+")
+
+# Delete series from SQLite database
+def delete_series_from_db(conn, cur, imdb_id):
+    cur.execute("SELECT imdb_id FROM shows WHERE imdb_id=?", (imdb_id,))
+    result = cur.fetchone()
+    if result is None:
+        debug_log(f"The series does not exist in the database (IMDb ID: {imdb_id})")
+    else:
+        cur.execute("DELETE FROM shows WHERE imdb_id=?", (imdb_id,))
+        conn.commit()
+        debug_log(f"Series removed from the database (IMDb ID: {imdb_id})")
 
 
+# Main function
+def main():
+    check_watchlists()
+    check_sickchill()
+    check_thetvdb()
+    conn, cur = setup_database()
+    series_list = get_imdb_watchlist_series()
+    insert_series_to_db(conn, cur, series_list)
+    get_thetvdb_ids(conn, cur)
+    sickchill_tvdb_ids = get_sickchill_shows()
+    update_added_to_sickchill(conn, cur, sickchill_tvdb_ids)
+    add_series_to_sickchill(conn, cur)
+    conn.close()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Add series to SickChill from IMDb watchlists")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--delete", metavar="IMDb_ID", help="Remove a series from the SQLite database using its IMDB ID")
+    parser.add_argument("--showdb", action="store_true", help="Display all series in the database")
+    args = parser.parse_args()
 
+    if args.debug:
+        settings["debug"] = 1
+        debug_log("Debug mode enabled")
 
-
-##############################  SICKBEARD INTERACTIONS  ############################	
-
-## Is Sickbeard reachable?
-def sickbeard_check():
-	sb_http_status = urllib2.urlopen(sickbeard_api_url).getcode()
-	if sb_http_status != 200:
-		print "Sickbeard cannot be contacted. Make sure it's running and host and port are corrects"
-		sys.exit()
-	else:
-		print "Sickbeard is running. Continuing..."
-		sb_showlist_download()
-
-		
-
-
-## Retrieve the list of all shows from Sickbeard
-def sb_showlist_download():
-	#	Get the list from Sickbeard
-	print ("Retrieving Sickbeard show list")
-	sb_show_list_url =  sickbeard_api_url + "/?cmd=shows"
-	if debug == 1:
-		print "Getting show list from: " + sb_show_list_url
-	response = urllib2.urlopen(sb_show_list_url)
-	sb_show_list_response = json.load(response)
-	response.close()
-#	Checking if the list downloaded correctly
-	if not sb_show_list_response['result'] == "success":
-		print "There was an error with the downloaded list"
-		sys.exit()
-	else:
-		print "Show list successfully retrieved from SickBeard"
-		print "Sending a list of Sickbeard shows for status update in local DB"
-		tvdb_show_status_update(sb_show_list_response['data'])
-
-
-		
-## Changing TVDB records status to "in_SB" for 	any records found in SB
-def tvdb_show_status_update(sb_show_list):
-#	print "Parsing SickBeard show list into a list of TVDB ID"
-	print "connecting database file: " + sickadd_db
-	conn = sqlite3.connect(sickadd_db)
-	c = conn.cursor()
-	for item in sb_show_list:
-		sb_show_id = sb_show_list[item]
-		show_name = sb_show_id['show_name']
-		tvdbid = str(sb_show_id['tvdbid'])
-		if debug == 1:
-			print "Checking show: " + tvdbid + ": " + show_name
-		c.execute ('UPDATE tvdb_fav SET state = 2 WHERE state != 2 AND tvdb_id  = ?', [tvdbid])
-		c.execute ('UPDATE tvdb_fav SET tvdb_name = ? WHERE tvdb_name != ? AND tvdb_id  = ?', (show_name, show_name, tvdbid))	
-	conn.commit()
-	conn.close()
-	print "Local database updated with current list of Sickbeard shows"
-
-	
-
-		
-## Add to SickBeard shows with TVDB IDs which are not already there
-def AddToSickbeard():
-	if debug == 1:
-		print "Adding to SickBeard shows with TVDB IDs which are not already there"
-	sb_add_show_url =  sickbeard_api_url + "/?cmd=show.addnew&tvdbid="
-	conn = sqlite3.connect(sickadd_db)
-	c = conn.cursor()
-	c.execute ("SELECT tvdb_id FROM tvdb_fav WHERE state < 2")
-	result_set = c.fetchall()
-	for tvdbid_list in result_set:
-		tvdb_id =  str(tvdbid_list[0])
-		if debug == 1:
-			print "Adding show with TVDB ID: " + tvdb_id
-			print sb_add_show_url + tvdb_id
-		response = urllib2.urlopen(sb_add_show_url + tvdb_id)
-		sb_add_show_response = json.load(response)
-		if not sb_add_show_response['result'] == "success":
-			print "There was an error wile adding the show"
-		else:
-			print "yipee! Show was successfully added to Sickbeard!"
-		
-	conn.commit()
-	conn.close()
-
-
-
-################################### SCRIPT STARTUP ###########################################	
-
-def startup():
-	db_check()
-# Is TVDB Enabled?
-	if tvdb_enabled == 1:
-		print "TVDB Favorites are enabled. Processing TVDB"
-		tvdb_processing()
-	else:
-		print "TVDB Favorites are disabled. Skipping TVDB Favorites download"
-
-# Is IMDB enabled?	
-	if imdb_enabled == 1:
-		print "IMDB watchlist is enabled. Downloading now IMDB watchlist"
-		imdb_processing(imdb_watchlist_rss_url)
-	else:
-		print "IMDB watchlist disabled. Skipping IMDB processing"
-	
-	sickbeard_check()
-	AddToSickbeard()	
-
-startup()
-
+    if args.delete:
+        conn, cur = setup_database()
+        delete_series_from_db(conn, cur, args.delete)
+        conn.close()
+    elif args.showdb:
+        conn, cur = setup_database()
+        show_db_content(cur)
+        conn.close()
+    else:
+        main()

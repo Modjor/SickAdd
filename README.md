@@ -1,35 +1,29 @@
 SickAdd
 =======
 
-A Python tool to automatically add your IMDB and/or TVDB favorites into Sickbeard (or SickRage)
-
-
-I've always been  a big fan of being able to add movie to CouchPotato sraight from my IMDB watchlist, and always dreamed to do the same with Sickbeard... Well, this is exactely what SickAdd has been designed for :)
-
-So far, SickAdd only support auto add of your favorites from your TVDB account, but plan is to also support ImDB and TVRage.
+A Python tool to automatically add your IMDB favorites into SickChill
 
 Roughely, SickAdd is following this logic:
-1. Download TVDB Favorites and/or IMDB watchlist
-2. Store result in the TVDB_table
-3. Download your show list from Sickbeard
-4. Automatically add to Sickbeard any show from your favorties and NOT in Sickbeard using your Sickbeard default profile
+1. Download  IMDB watchlist(s)
+2. Only keeps TV Shows
+3. Store result in a sqlite db
+4. Download your show list from Sickchill
+5. Automatically add to Sickchill any show from the specified wtachlist and NOT already in Sickchill using your Sickbeard default profile.
 
 Usage/Configuration:
-- Set your install path (where the DB file will be stored - need write permission)
+You'll need Python3 installed with argparse, sqlite3, requests & BeautifulSoup.
 - Set your Sickbeard host, port and API key
-- Set your TVDB Account ID and/or IMDB watchlist (RSS version!!)
-- Schedule a task to run this script every x hours (IE: using cron under linux)
+- Set your IMDB lists URL (multiple supported)
+- Schedule a task to run this script every x hours (IE: using cron under linux) : python SickAdd.py
 
-That's it, enjoy your TVDB/IMDB Favorites TV Shows being automatically retrieved and added to SickBeard using your SB default profile
+That's it, enjoy your TVDB/IMDB Favorites TV Shows being automatically retrieved and added to SickBeard using your Sickchill default profile
 
 
 Release note:
-I've been tested this successfully with SickRage, and works smoothly.
-However be carfeull if your using TVRage as indexer, since SickAdd only supports TVDB Id currently, if a show indexed with TVRage in Sickbeard was added to your TVDB ID favorites it would most likely add it a second time to Sickbeard (not tested but kind of expected behavior).
+Add series to SickChill from IMDb watchlists
 
-I haven't test this script under Windows, but it should work correctly.
-
-
-Notes:
-You need Python with Lxml module to run this tool.
-On Synology, you need to install packages Python 2.x and Python Modules (which contains lxml)
+options:
+  -h, --help        show this help message and exit
+  --debug           Enable debug mode
+  --delete IMDb_ID  Remove a series from the SQLite database using its IMDB ID
+  --showdb          Display all series in the database

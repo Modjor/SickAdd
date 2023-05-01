@@ -9,7 +9,10 @@
 #
 #
 # Changelog
-#Version 3.0
+# Version 3.1
+# Supports imdb list with over 100 items
+#
+# Version 3.0
 # Full rewrite, now supports multiple imdb watchlist to be monitored, various command line argument including browsing &
 # deleting items from the sqlite db
 #

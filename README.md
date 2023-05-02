@@ -11,6 +11,7 @@ Roughely, SickAdd is following this logic:
 4. Download your show list from Sickchill
 5. Automatically add to Sickchill using TheTVDB IDs any show from the specified watchlist(s) NOT already in Sickchill and NOT added previoulsy with SickAdd, using your Sickchill default profile.
 
+
 Usage/Configuration:
 You'll need Python3 installed with argparse, sqlite3, requests & BeautifulSoup.
 - Set your Sickchill host, port and API key
@@ -18,6 +19,10 @@ You'll need Python3 installed with argparse, sqlite3, requests & BeautifulSoup.
 - Schedule a task to run this script every x hours (IE: using cron under linux) : python SickAdd.py
 
 That's it, enjoy your IMDB TV Shows being automatically retrieved and added to SickBeard using your Sickchill default profile
+
+Additional usage:
+- You can list all shows from the sqlite db using the command ""SickAdd.py --showdb"
+- You can remove previously added item from the sqlite db using the command "SickAdd.py --delete IMDb_ID" (replace IMDB_ID with the IMDB ID of the show you want to remove from the SickChill DB.
 
 
 Release note:

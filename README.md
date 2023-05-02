@@ -18,7 +18,7 @@ You'll need Python3 installed with argparse, sqlite3, requests & BeautifulSoup.
 - Set your IMDB lists URL (multiple supported)
 - Schedule a task to run this script every x hours (IE: using cron under linux) : python SickAdd.py
 
-That's it, enjoy your IMDB TV Shows being automatically retrieved and added to SickBeard using your Sickchill default profile
+That's it, enjoy your IMDB TV Shows being automatically retrieved and added to SickChill using your default profile
 
 Additional usage:
 - You can list all shows from the sqlite db using the command ""SickAdd.py --showdb"

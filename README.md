@@ -6,13 +6,14 @@ A Python tool to automatically add your IMDB favorites into SickChill
 Roughely, SickAdd is following this logic:
 1. Download  IMDB watchlist(s)
 2. Only keeps TV Shows
+3. Map IMDB IDs to TheTVDB IDs
 3. Store result in a sqlite db
 4. Download your show list from Sickchill
-5. Automatically add to Sickchill any show from the specified wtachlist and NOT already in Sickchill using your Sickbeard default profile.
+5. Automatically add to Sickchill using TheTVDB IDs any show from the specified watchlist(s) NOT already in Sickchill and NOT added previoulsy with SickAdd, using your Sickchill default profile.
 
 Usage/Configuration:
 You'll need Python3 installed with argparse, sqlite3, requests & BeautifulSoup.
-- Set your Sickbeard host, port and API key
+- Set your Sickchill host, port and API key
 - Set your IMDB lists URL (multiple supported)
 - Schedule a task to run this script every x hours (IE: using cron under linux) : python SickAdd.py
 

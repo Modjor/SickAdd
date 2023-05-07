@@ -23,19 +23,6 @@
 # - Add IMDB Watch list support (using IMDB Mapping from TVDB)
 # - Add a Debug mode so it's a bit less verbose in standard mode
 #
-##################################################################################
-
-
-# Settings
-settings = {
-    "watchlist_urls": [
-        "https://www.imdb.com/list/lsxxxxxxxx", "https://www.imdb.com/list/lsxxxxxxxxxx"
-    ],
-    "sickchill_url": "http://sickchill_ip:8081",
-    "sickchill_api_key": "your_sickchill_api_key",
-    "debug": 1,
-}
-
 #########    NO MODIFICATION UNDER THAT LINE
 ##########################################################
 
@@ -45,8 +32,6 @@ import sqlite3
 import requests
 from bs4 import BeautifulSoup
 import json
-# import re
-# import os
 from datetime import datetime
 
 
@@ -95,10 +80,16 @@ def check_sickchill():
     try:
         response = requests.get(url)
         response.raise_for_status()
+        if not response.json().get("data"):
+            debug_log("Error: SickChill API key is incorrect.")
+            print("Error: SickChill API key is incorrect.")
+            sys.exit(1)
     except requests.exceptions.RequestException as e:
-        print("Error: SickChill is not reachable.")
+        debug_log("Error: SickChill is not reachable.")
+        print("Error: SickChill is not reachable. Check your SickChill server IP, Port and API key.")
         sys.exit(1)
-    debug_log("SickChill is reachable.")
+    debug_log("SickChill is reachable. Check your SickChill server IP, Port and API key.")
+
 
 
 # Check if TheTVDB is reachable
@@ -114,7 +105,6 @@ def check_thetvdb():
     else:
         debug_log("TheTVDB is reachable.")
   
-
 
 # Create or connect to SQLite database
 def setup_database():
@@ -144,28 +134,33 @@ def get_imdb_watchlist_series():
         "Accept-Language": "en-US"
     }
     for url in settings["watchlist_urls"]:
-        debug_log(f"Fetching IMDb watchlist: {url}")
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, "html.parser")
-        series_items = soup.find_all("div", class_="lister-item mode-detail")
-        debug_log(f"Number of series found in the watchlist: {len(series_items)}")
-        for item in series_items:
-            imdb_id = item.find("div", class_="ribbonize")["data-tconst"]
-            title = item.find("h3", class_="lister-item-header").find("a").text
-            imdb_url = f"https://www.imdb.com/title/{imdb_id}/"
-            imdb_response = requests.get(imdb_url, headers=headers)
-            imdb_soup = BeautifulSoup(imdb_response.text, "html.parser")
-            title_tag = imdb_soup.find("title")
-
-            if title_tag and "TV Series" in title_tag.text:
-                series_list.append({
-                    "imdb_id": imdb_id,
-                    "title": title,
-                    "watchlist_url": url,
-                })
-                debug_log(f"TV Series detected: {title} ({imdb_id})")
-            else:
-                debug_log(f"Ignored item (not a TV series): {title}")
+        page_number = 1
+        while True:
+            watchlist_url = f"{url}?page={page_number}"
+            debug_log(f"Fetching IMDb watchlist: {watchlist_url}")
+            response = requests.get(watchlist_url, headers=headers)
+            soup = BeautifulSoup(response.text, "html.parser")
+            series_items = soup.find_all("div", class_="lister-item mode-detail")
+            debug_log(f"Number of series found in the watchlist: {len(series_items)}")
+            for item in series_items:
+                imdb_id = item.find("div", class_="ribbonize")["data-tconst"]
+                title = item.find("h3", class_="lister-item-header").find("a").text
+                imdb_url = f"https://www.imdb.com/title/{imdb_id}/"
+                imdb_response = requests.get(imdb_url, headers=headers)
+                imdb_soup = BeautifulSoup(imdb_response.text, "html.parser")
+                title_tag = imdb_soup.find("title")
+                if title_tag and "TV Series" in title_tag.text:
+                    series_list.append({
+                        "imdb_id": imdb_id,
+                        "title": title,
+                        "watchlist_url": watchlist_url,
+                    })
+                    debug_log(f"TV Series detected: {title} ({imdb_id})")
+                else:
+                    debug_log(f"Ignored item (not a TV series): {title}")
+            if len(series_list) >= 100 or len(series_items) < 100:
+                break
+            page_number += 1
     debug_log(f"Total series fetched: {len(series_list)}")
     return series_list
 
@@ -295,16 +290,60 @@ def main():
     update_added_to_sickchill(conn, cur, sickchill_tvdb_ids)
     add_series_to_sickchill(conn, cur)
     conn.close()
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Add series to SickChill from IMDb watchlists")
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
-    parser.add_argument("--delete", metavar="IMDb_ID", help="Remove a series from the SQLite database using its IMDB ID")
-    parser.add_argument("--showdb", action="store_true", help="Display all series in the database")
+    parser = argparse.ArgumentParser(
+        description="Add series to SickChill from IMDb watchlists",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode"
+    )
+    parser.add_argument(
+        "--delete",
+        metavar="IMDb_ID",
+        help="Remove a series from the SQLite database using its IMDb ID\n"
+             'Example: --delete "tt1234567"'
+    )
+    parser.add_argument(
+        "--showdb",
+        action="store_true",
+        help="Display all series in the database"
+    )
+    parser.add_argument(
+        "--watchlist_urls",
+        nargs="+",
+        metavar="URL",
+        help='List of IMDb watchlist URLs separated by commas\n'
+             'Example: --watchlist_urls "https://www.imdb.com/list/ls00000000,https://www.imdb.com/list/ls123456789"'
+    )
+    parser.add_argument(
+        "--sickchill_url",
+        help='SickChill URL (example: http://sickchill_ip:port)\n'
+             'Example: --sickchill_url "http://192.168.1.2:8081"'
+    )
+    parser.add_argument(
+        "--sickchill_api_key",
+        help="SickChill API key\n"
+             'Example: --sickchill_api_key "1a2b3c4d5e6f7g8h"'
+    )
     args = parser.parse_args()
 
     if args.debug:
         settings["debug"] = 1
         debug_log("Debug mode enabled")
+
+    if args.watchlist_urls:
+        watchlist_urls = [url.strip() for url in ",".join(args.watchlist_urls).split(",")]
+        settings["watchlist_urls"] = watchlist_urls
+
+    if args.sickchill_url:
+        settings["sickchill_url"] = args.sickchill_url
+
+    if args.sickchill_api_key:
+        settings["sickchill_api_key"] = args.sickchill_api_key
 
     if args.delete:
         conn, cur = setup_database()

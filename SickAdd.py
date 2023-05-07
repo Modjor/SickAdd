@@ -32,7 +32,7 @@ settings = {
         "https://www.imdb.com/list/ls123456789", "https://www.imdb.com/list/ls987654321"
     ],
     "sickchill_url": "http://sickchill_ip:port",
-    "sickchill_api_key": "your_sickchill_api",
+    "sickchill_api_key": "your_sickchill_api_key",
     "database_path": "",
     "debug_log_path": "",
     "debug": 1,

@@ -22,7 +22,24 @@
 # Version 2
 # - Add IMDB Watch list support (using IMDB Mapping from TVDB)
 # - Add a Debug mode so it's a bit less verbose in standard mode
-#
+###########################################################
+
+
+
+# Settings
+settings = {
+    "watchlist_urls": [
+        "https://www.imdb.com/list/ls123456789", "https://www.imdb.com/list/ls987654321"
+    ],
+    "sickchill_url": "http://sickchill_ip:port",
+    "sickchill_api_key": "your_sickchill_api",
+    "database_path": "",
+    "debug_log_path": "",
+    "debug": 1,
+}
+
+
+
 #########    NO MODIFICATION UNDER THAT LINE
 ##########################################################
 
@@ -33,6 +50,7 @@ import requests
 from bs4 import BeautifulSoup
 import json
 from datetime import datetime
+import os
 
 
 
@@ -41,8 +59,21 @@ def debug_log(message):
     if settings["debug"]:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] {message}")
-        with open("debug.log", "a") as log_file:
+        log_file_path = settings["debug_log_path"]
+
+        # Set a default log file name if the path is empty
+        if not log_file_path:
+            log_file_path = "sickadd.log"
+
+        # Create the directory if it doesn't exist and if the directory path is not empty
+        directory_path = os.path.dirname(log_file_path)
+        if directory_path:
+            os.makedirs(directory_path, exist_ok=True)
+
+        with open(log_file_path, "a") as log_file:
             log_file.write(f"[{timestamp}] {message}\n")
+
+
 
 # Check if IMDB Watchlists are reachable
 def check_watchlists():
@@ -88,7 +119,7 @@ def check_sickchill():
         debug_log("Error: SickChill is not reachable.")
         print("Error: SickChill is not reachable. Check your SickChill server IP, Port and API key.")
         sys.exit(1)
-    debug_log("SickChill is reachable. Check your SickChill server IP, Port and API key.")
+    debug_log("SickChill is reachable.")
 
 
 
@@ -105,10 +136,25 @@ def check_thetvdb():
     else:
         debug_log("TheTVDB is reachable.")
   
-
 # Create or connect to SQLite database
 def setup_database():
-    conn = sqlite3.connect("sickadd.db")
+    if "database_path" in settings:
+        database_path = settings["database_path"]
+    else:
+        database_path = os.path.join(os.getcwd(), "sickadd.db")
+
+    # Set a default database file name if the path is empty
+    if not database_path:
+        database_path = "sickadd.db"
+
+    # Create the directory if it doesn't exist and if the directory path is not empty
+    directory_path = os.path.dirname(database_path)
+    if directory_path:
+        os.makedirs(directory_path, exist_ok=True)
+
+    debug_log(f"Database path: {database_path}")
+    conn = sqlite3.connect(database_path)
+    debug_log(f"Connected to database at: {conn}")
     cur = conn.cursor()
     cur.execute(
         """
@@ -125,6 +171,9 @@ def setup_database():
     )
     conn.commit()
     return conn, cur
+
+
+
 
 # Get IMDb watchlists and extract series
 def get_imdb_watchlist_series():
@@ -329,6 +378,11 @@ if __name__ == "__main__":
         help="SickChill API key\n"
              'Example: --sickchill_api_key "1a2b3c4d5e6f7g8h"'
     )
+    parser.add_argument(
+        "--database_path",
+        help='Path to the SQLite database file\n'
+             'Example: --database_path "/var/sickadd.db"'
+    )
     args = parser.parse_args()
 
     if args.debug:
@@ -344,6 +398,9 @@ if __name__ == "__main__":
 
     if args.sickchill_api_key:
         settings["sickchill_api_key"] = args.sickchill_api_key
+
+    if args.database_path:
+        settings["database_path"] = args.database_path
 
     if args.delete:
         conn, cur = setup_database()

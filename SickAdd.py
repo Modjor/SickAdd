@@ -25,7 +25,6 @@
 ###########################################################
 
 
-
 # Settings
 settings = {
     "watchlist_urls": [
@@ -37,7 +36,6 @@ settings = {
     "debug_log_path": "",
     "debug": 1,
 }
-
 
 
 #########    NO MODIFICATION UNDER THAT LINE
@@ -383,11 +381,18 @@ if __name__ == "__main__":
         help='Path to the SQLite database file\n'
              'Example: --database_path "/var/sickadd.db"'
     )
+    parser.add_argument(
+        "--debug_log_path",
+        help='Path to the log file when debug mode is enabled\n'
+             'Example: --debug_log_path "/var/log/sickadd.log"'
+    )
     args = parser.parse_args()
 
     if args.debug:
         settings["debug"] = 1
         debug_log("Debug mode enabled")
+        if args.debug_log_path:
+            settings["debug_log_path"] = args.debug_log_path
 
     if args.watchlist_urls:
         watchlist_urls = [url.strip() for url in ",".join(args.watchlist_urls).split(",")]
@@ -412,3 +417,4 @@ if __name__ == "__main__":
         conn.close()
     else:
         main()
+

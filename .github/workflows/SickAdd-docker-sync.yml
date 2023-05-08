@@ -1,0 +1,35 @@
+name: Push Sickadd.py to Sickadd-docker
+
+on:
+  push:
+    paths:
+      - 'Sickadd.py'
+
+jobs:
+  push_to_sickadd_docker:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Sickadd repository
+      uses: actions/checkout@v2
+      with:
+        ref: Stable
+
+    - name: Checkout Sickadd-docker repository
+      uses: actions/checkout@v2
+      with:
+        repository: <your-github-username>/Sickadd-docker
+        token: ${{ secrets.GH_PAT }}
+        path: Sickadd-docker
+
+    - name: Copy Sickadd.py
+      run: cp Sickadd.py Sickadd-docker/
+
+    - name: Commit and push changes
+      working-directory: Sickadd-docker
+      run: |
+        git config user.name "Modjor"
+        git config user.email "modjor@badabing.fr"
+        git checkout Master
+        git add Sickadd.py
+        git commit -m "Update Sickadd.py from Sickadd repository"
+        git push

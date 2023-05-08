@@ -49,7 +49,9 @@ from bs4 import BeautifulSoup
 import json
 from datetime import datetime
 import os
-
+import html
+import time
+import re
 
 
 # Debug function
@@ -171,46 +173,135 @@ def setup_database():
     return conn, cur
 
 
-
-
-# Get IMDb watchlists and extract series
-def get_imdb_watchlist_series():
-    series_list = []
+##########################
+# Retrieve IMDb IDs from a given IMDb watchlist URL
+def get_imdb_watchlists(url):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
-        "Accept-Language": "en-US"
+        "Accept-Language": "en-US,en;q=0.5"
     }
-    for url in settings["watchlist_urls"]:
-        page_number = 1
-        while True:
-            watchlist_url = f"{url}?page={page_number}"
-            debug_log(f"Fetching IMDb watchlist: {watchlist_url}")
-            response = requests.get(watchlist_url, headers=headers)
-            soup = BeautifulSoup(response.text, "html.parser")
-            series_items = soup.find_all("div", class_="lister-item mode-detail")
-            debug_log(f"Number of series found in the watchlist: {len(series_items)}")
-            for item in series_items:
-                imdb_id = item.find("div", class_="ribbonize")["data-tconst"]
-                title = item.find("h3", class_="lister-item-header").find("a").text
-                imdb_url = f"https://www.imdb.com/title/{imdb_id}/"
-                imdb_response = requests.get(imdb_url, headers=headers)
-                imdb_soup = BeautifulSoup(imdb_response.text, "html.parser")
-                title_tag = imdb_soup.find("title")
-                if title_tag and "TV Series" in title_tag.text:
-                    series_list.append({
-                        "imdb_id": imdb_id,
-                        "title": title,
-                        "watchlist_url": watchlist_url,
-                    })
-                    debug_log(f"TV Series detected: {title} ({imdb_id})")
-                else:
-                    debug_log(f"Ignored item (not a TV series): {title}")
-            if len(series_list) >= 100 or len(series_items) < 100:
-                break
-            page_number += 1
-    debug_log(f"Total series fetched: {len(series_list)}")
-    return series_list
 
+    debug_log(f"Fetching watchlist content from URL: {url}")
+    response = requests.get(url, headers=headers)
+
+    if response.status_code != 200:
+        debug_log(f"Request failed for URL: {url}")
+        exit()
+
+    imdb_ids = re.findall(r'tt\d{5,8}', response.text)
+    imdb_ids = list(set(imdb_ids))
+    debug_log(f"URL: {url} - Total IMDb IDs: {len(imdb_ids)}")
+
+    return imdb_ids
+
+
+# Determine if an IMDb ID corresponds to a TV series or mini-series, and returns the title if it is
+def detect_imdb_tv_show(imdb_id, analyzed_items=None):
+    if analyzed_items is None:
+        analyzed_items = {}
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+        "Accept-Language": "en-US,en;q=0.5"
+    }
+
+    series_url = f"https://www.imdb.com/title/{imdb_id}/"
+    debug_log(f"Fetching series content from URL: {series_url}")
+    series_response = requests.get(series_url, headers=headers)
+
+    if series_response.status_code == 200:
+        title_search = re.search(r'<title>(.+?)</title>', series_response.text)
+        if title_search:
+            title = html.unescape(title_search.group(1))
+            debug_log(f"ID: {imdb_id} - Title: {title}")
+            if "TV Series" in title or "TV Mini Series" in title:
+                if imdb_id not in analyzed_items:
+                    analyzed_items[imdb_id] = title
+                    debug_log(f"ID: {imdb_id} - Title: {title} - Is a TV series")
+                    return (True, title)
+                else:
+                    debug_log(f"ID: {imdb_id} - Title: {title} - Already analyzed")
+                    return (False, title)
+            else:
+                debug_log(f"ID: {imdb_id} - Title: {title} - Is not a TV series")
+                return (False, title)
+        else:
+            debug_log(f"ID: {imdb_id} - Title not found")
+            return (False, "")
+    else:
+        debug_log(f"Request failed for series URL: {series_url}")
+        return (False, "")
+
+# Process and analyze IMDb watchlists to retrieve a list of unique TV series and mini-series
+def imdb_watchlists_init():
+    watchlist_summary = []
+    all_series_ids = {}
+    unique_series_ids = {}
+
+    for url in settings["watchlist_urls"]:
+        imdb_ids = get_imdb_watchlists(url)
+        series_ids = []
+        ignored_ids = []
+
+        for imdb_id in imdb_ids:
+            if imdb_id in all_series_ids:
+                if all_series_ids[imdb_id] == "TV Series" or all_series_ids[imdb_id] == "TV Mini-Series":
+                    series_ids.append(imdb_id)
+                else:
+                    ignored_ids.append(imdb_id)
+            else:
+                is_tv_series, title = detect_imdb_tv_show(imdb_id, analyzed_items=all_series_ids)
+                if is_tv_series:
+                    series_ids.append(imdb_id)
+                    all_series_ids[imdb_id] = "TV Series" if "TV Series" in title else "TV Mini-Series" if "TV Mini-Series" in title else "TV Series or Mini-Series"
+                    unique_series_ids[imdb_id] = {"title": title, "watchlist_url": url}
+                else:
+                    ignored_ids.append(imdb_id)
+                    all_series_ids[imdb_id] = "Not a TV Series"
+
+        watchlist_summary.append({
+            "url": url,
+            "total_items": len(imdb_ids),
+            "series_items": len(series_ids),
+            "ignored_items": len(ignored_ids)
+        })
+
+    # Convert unique_series_ids to a list of dictionaries
+    series_list = [dict(imdb_id=k, **v) for k, v in unique_series_ids.items()]
+
+    # Debug output
+    debug_log("\nWatchlist Summary:")
+    for summary in watchlist_summary:
+        debug_log(f"URL: {summary['url']}")
+        debug_log(f"  Total items: {summary['total_items']}")
+        debug_log(f"  Series items: {summary['series_items']}")
+        debug_log(f"  Ignored items: {summary['ignored_items']}")
+
+        for imdb_id, data in unique_series_ids.items():
+            if data["watchlist_url"] == summary["url"]:
+                debug_log(f"  {imdb_id} - {data['title']} (from {data['watchlist_url']})")
+
+    global_total_items = sum([summary["total_items"] for summary in watchlist_summary])
+    global_series_items = sum([summary["series_items"] for summary in watchlist_summary])
+    global_ignored_items = sum([summary["ignored_items"] for summary in watchlist_summary])
+    global_duplicate_items = global_series_items - len(series_list)
+
+    debug_log("\nGlobal Summary:")
+    debug_log(f"  Total items: {global_total_items}")
+    debug_log(f"  Series items: {global_series_items}")
+    debug_log(f"  Unique series items: {len(series_list)}")
+    debug_log(f"  Ignored items: {global_ignored_items}")
+    debug_log(f"  Duplicate items: {global_duplicate_items}")
+
+    debug_log("")
+
+    # Debug output for series_list
+    debug_log("Series to Import into SickAdd:")
+    for series in series_list:
+        debug_log(f'  IMDb ID: {series["imdb_id"]}, Title: {series["title"]}, Watchlist URL: {series["watchlist_url"]}')
+
+    return series_list
+#######################
 
 # Insert series into SQLite database
 def insert_series_to_db(conn, cur, series_list):
@@ -330,7 +421,7 @@ def main():
     check_sickchill()
     check_thetvdb()
     conn, cur = setup_database()
-    series_list = get_imdb_watchlist_series()
+    series_list = imdb_watchlists_init()
     insert_series_to_db(conn, cur, series_list)
     get_thetvdb_ids(conn, cur)
     sickchill_tvdb_ids = get_sickchill_shows()
@@ -417,4 +508,3 @@ if __name__ == "__main__":
         conn.close()
     else:
         main()
-

@@ -1,27 +1,26 @@
-#!/usr/bin/env python
+ #!/usr/bin/env python
 #
 ##################################################################################
 ### SickAdd V3  - THIS IS AN ALPHA RELEASE
 #
-# This script downloads your IMDB favorites and add them to your SickBeard shows
+# This script downloads your IMDb favorites and adds them to your SickBeard shows
 #
 # NOTE: This script requires Python to be installed on your system
 #
 #
 # Changelog
+# Version 3.2
+# - Now stores all IDs from IMDb watchlists with a new show_type db field to differentiate TV shows
+# - Dramatically reduces the number of requests to IMDb by ignoring any known IMDb ID
+# - Provides a foundation for future movie support.
+# - Rewrite the IMDB parser to detect additional shows, such as Mini-Series, and to support various types of IMDB lists.
+#
 # Version 3.1
-# Supports imdb list with over 100 items
+# Supports IMDb lists with over 100 items
 #
 # Version 3.0
-# Full rewrite, now supports multiple imdb watchlist to be monitored, various command line argument including browsing &
-# deleting items from the sqlite db
-#
-# Version 2.1
-# Minor Bug correction around TVDB url / IMDB mapping)
-#
-# Version 2
-# - Add IMDB Watch list support (using IMDB Mapping from TVDB)
-# - Add a Debug mode so it's a bit less verbose in standard mode
+# Full rewrite, now supports multiple IMDb watchlists to be monitored, various command-line arguments including browsing &
+# deleting items from the SQLite database
 ###########################################################
 
 
@@ -40,7 +39,6 @@ settings = {
 
 #########    NO MODIFICATION UNDER THAT LINE
 ##########################################################
-
 import sys
 import argparse
 import sqlite3
@@ -73,9 +71,7 @@ def debug_log(message):
         with open(log_file_path, "a") as log_file:
             log_file.write(f"[{timestamp}] {message}\n")
 
-
-
-# Check if IMDB Watchlists are reachable
+# Check if IMDb Watchlists are reachable
 def check_watchlists():
     # Create a list to store unreachable watchlists
     unreachable_watchlists = []
@@ -117,11 +113,9 @@ def check_sickchill():
             sys.exit(1)
     except requests.exceptions.RequestException as e:
         debug_log("Error: SickChill is not reachable.")
-        print("Error: SickChill is not reachable. Check your SickChill server IP, Port and API key.")
+        print("Error: SickChill is not reachable. Check your SickChill server IP, Port, and API key.")
         sys.exit(1)
     debug_log("SickChill is reachable.")
-
-
 
 # Check if TheTVDB is reachable
 def check_thetvdb():
@@ -135,9 +129,10 @@ def check_thetvdb():
         sys.exit(1)
     else:
         debug_log("TheTVDB is reachable.")
-  
+
 # Create or connect to SQLite database
 def setup_database():
+    # Check if the database path is specified in the settings
     if "database_path" in settings:
         database_path = settings["database_path"]
     else:
@@ -170,10 +165,24 @@ def setup_database():
         """
     )
     conn.commit()
+    ## DB Migration steps for new versions
+    # Add the 'show_type' column if it doesn't exist
+    cur.execute("PRAGMA table_info(shows)")
+    columns = cur.fetchall()
+    column_names = [column[1] for column in columns]
+    if "show_type" not in column_names:
+        cur.execute("ALTER TABLE shows ADD COLUMN show_type INTEGER")
+        conn.commit()
+        debug_log("Added new column 'show_type' to the 'shows' table")
+
+        # Set all existing show entries 'show_type' to 1
+        cur.execute("UPDATE shows SET show_type = 1")
+        conn.commit()
+        debug_log("DB Migration - Set all existing show show_type to 1 (TV Shows)")
+
     return conn, cur
 
 
-##########################
 # Retrieve IMDb IDs from a given IMDb watchlist URL
 def get_imdb_watchlists(url):
     headers = {
@@ -193,7 +202,6 @@ def get_imdb_watchlists(url):
     debug_log(f"URL: {url} - Total IMDb IDs: {len(imdb_ids)}")
 
     return imdb_ids
-
 
 # Determine if an IMDb ID corresponds to a TV series or mini-series, and returns the title if it is
 def detect_imdb_tv_show(imdb_id, analyzed_items=None):
@@ -237,6 +245,14 @@ def imdb_watchlists_init():
     watchlist_summary = []
     all_series_ids = {}
     unique_series_ids = {}
+    unique_unknown_ids = {}
+
+    conn, cur = setup_database()
+
+    # Retrieve IMDb IDs and titles from the 'shows' table with a 'show_type' value of 0 or 1
+    cur.execute("SELECT imdb_id, title FROM shows WHERE show_type = 0 OR show_type = 1")
+    rows = cur.fetchall()
+    existing_ids = {row[0]: row[1] for row in rows}  # Convert to dictionary for faster lookup
 
     for url in settings["watchlist_urls"]:
         imdb_ids = get_imdb_watchlists(url)
@@ -244,6 +260,10 @@ def imdb_watchlists_init():
         ignored_ids = []
 
         for imdb_id in imdb_ids:
+            if imdb_id in existing_ids:
+                debug_log(f"Ignoring. Already in SickAdd database: {imdb_id} - {existing_ids[imdb_id]}")
+                continue
+
             if imdb_id in all_series_ids:
                 if all_series_ids[imdb_id] == "TV Series" or all_series_ids[imdb_id] == "TV Mini-Series":
                     series_ids.append(imdb_id)
@@ -254,10 +274,15 @@ def imdb_watchlists_init():
                 if is_tv_series:
                     series_ids.append(imdb_id)
                     all_series_ids[imdb_id] = "TV Series" if "TV Series" in title else "TV Mini-Series" if "TV Mini-Series" in title else "TV Series or Mini-Series"
+                    if title is None:
+                        title = "Unknown IMDB Title"
                     unique_series_ids[imdb_id] = {"title": title, "watchlist_url": url}
                 else:
                     ignored_ids.append(imdb_id)
                     all_series_ids[imdb_id] = "Not a TV Series"
+                    if title is None:
+                        title = "Unknown IMDB Title"
+                    unique_unknown_ids[imdb_id] = {"title": title, "watchlist_url": url}
 
         watchlist_summary.append({
             "url": url,
@@ -266,8 +291,9 @@ def imdb_watchlists_init():
             "ignored_items": len(ignored_ids)
         })
 
-    # Convert unique_series_ids to a list of dictionaries
+    # Convert unique_series_ids and unique_unknown_ids to a list of dictionaries
     series_list = [dict(imdb_id=k, **v) for k, v in unique_series_ids.items()]
+    unknown_list = [dict(imdb_id=k, **v) for k, v in unique_unknown_ids.items()]
 
     # Debug output
     debug_log("\nWatchlist Summary:")
@@ -279,17 +305,20 @@ def imdb_watchlists_init():
 
         for imdb_id, data in unique_series_ids.items():
             if data["watchlist_url"] == summary["url"]:
-                debug_log(f"  {imdb_id} - {data['title']} (from {data['watchlist_url']})")
+                title = data['title'] if data['title'] is not None else "Unknown IMDB Title"
+                debug_log(f"  {imdb_id} - {title} (from {data['watchlist_url']})")
+            else:
+                debug_log(f"  {imdb_id} - Unknown IMDB Title (from {data['watchlist_url']})")
 
     global_total_items = sum([summary["total_items"] for summary in watchlist_summary])
     global_series_items = sum([summary["series_items"] for summary in watchlist_summary])
     global_ignored_items = sum([summary["ignored_items"] for summary in watchlist_summary])
     global_duplicate_items = global_series_items - len(series_list)
-
     debug_log("\nGlobal Summary:")
     debug_log(f"  Total items: {global_total_items}")
     debug_log(f"  Series items: {global_series_items}")
     debug_log(f"  Unique series items: {len(series_list)}")
+    debug_log(f"  Unique non-series items: {len(unknown_list)}")
     debug_log(f"  Ignored items: {global_ignored_items}")
     debug_log(f"  Duplicate items: {global_duplicate_items}")
 
@@ -300,24 +329,37 @@ def imdb_watchlists_init():
     for series in series_list:
         debug_log(f'  IMDb ID: {series["imdb_id"]}, Title: {series["title"]}, Watchlist URL: {series["watchlist_url"]}')
 
-    return series_list
-#######################
-
+    return series_list, unknown_list
+    
 # Insert series into SQLite database
 def insert_series_to_db(conn, cur, series_list):
     for series in series_list:
         cur.execute("SELECT * FROM shows WHERE imdb_id=?", (series["imdb_id"],))
         if not cur.fetchone():
+            # Insert series with show_type set to 1
             cur.execute(
-                "INSERT INTO shows (imdb_id, title, watchlist_url, imdb_import_date, added_to_sickchill) VALUES (?, ?, ?, ?, ?)",
-                (series["imdb_id"], series["title"], series["watchlist_url"], datetime.now().strftime("%Y-%m-%d"), 0),
+                "INSERT INTO shows (imdb_id, title, watchlist_url, imdb_import_date, added_to_sickchill, show_type) VALUES (?, ?, ?, ?, ?, ?)",
+                (series["imdb_id"], series["title"], series["watchlist_url"], datetime.now().strftime("%Y-%m-%d"), 0, 1),
             )
             conn.commit()
             debug_log(f'Series added to the database: {series["title"]} (IMDb ID: {series["imdb_id"]})')
 
+# Insert unknown items into SQLite database
+def insert_unique_unknown_ids(conn, cur, unknown_list):
+    for unknown in unknown_list:
+        cur.execute("SELECT * FROM shows WHERE imdb_id=?", (unknown["imdb_id"],))
+        if not cur.fetchone():
+            # Insert unknown item with show_type set to 0
+            cur.execute(
+                "INSERT INTO shows (imdb_id, title, watchlist_url, imdb_import_date, added_to_sickchill, show_type) VALUES (?, ?, ?, ?, ?, ?)",
+                (unknown["imdb_id"], unknown["title"], unknown["watchlist_url"], datetime.now().strftime("%Y-%m-%d"), 0, 0),
+            )
+            conn.commit()
+            debug_log(f'Unknown item added to the database: {unknown["title"]} (IMDb ID: {unknown["imdb_id"]})')
+
 # Get TheTVDB ID for series in the database
 def get_thetvdb_ids(conn, cur):
-    cur.execute("SELECT imdb_id, title FROM shows WHERE thetvdb_id IS NULL")
+    cur.execute("SELECT imdb_id, title FROM shows WHERE thetvdb_id IS NULL AND show_type=1")
     series_without_thetvdb_id = cur.fetchall()
     for imdb_id, title in series_without_thetvdb_id:
         try:
@@ -361,7 +403,7 @@ def update_added_to_sickchill(conn, cur, sickchill_tvdb_ids):
 
 # Add series to SickChill
 def add_series_to_sickchill(conn, cur):
-    cur.execute("SELECT thetvdb_id, title FROM shows WHERE added_to_sickchill=0")
+    cur.execute("SELECT thetvdb_id, title FROM shows WHERE added_to_sickchill=0 AND show_type=1")
     shows_to_add = cur.fetchall()
     debug_log(f"{len(shows_to_add)} series to add to SickChill")
     for show in shows_to_add:
@@ -377,31 +419,67 @@ def add_series_to_sickchill(conn, cur):
         else:
             debug_log(f"Unable to add series to SickChill (TheTVDB ID: {thetvdb_id}, Title: {title}) - Response code: {response.status_code}")
 
-
-
-
-# Show the SQLite database content
 def show_db_content(cursor):
-    cursor.execute("PRAGMA table_info(shows)")
-    columns = [column[1] for column in cursor.fetchall()]
-    cursor.execute("SELECT * FROM shows")
-    rows = cursor.fetchall()
+    # Select records where the Type is Unknown (Not TV Shows)
+    cursor.execute("SELECT * FROM shows WHERE show_type = 0")
+    type_unknowns = cursor.fetchall()
 
-    # Print column names
-    column_names = "|".join(columns)
-    print(f"+{'-' * len(column_names.replace('|', ''))}+")
-    print(f"| {column_names} |")
+    # Select records where the Type is TV Show or Mini Series
+    cursor.execute("SELECT * FROM shows WHERE show_type = 1")
+    type_tv_shows = cursor.fetchall()
 
-    # Print separator
-    print(f"+{'-' * len(column_names.replace('|', ''))}+")
+    # Select records with incomplete data
+    cursor.execute("SELECT * FROM shows WHERE show_type NOT IN (0, 1)")
+    incomplete_records = cursor.fetchall()
 
-    # Print rows with field values
-    for row in rows:
-        row_values = "|".join([str(value) for value in row])
-        print(f"| {row_values} |")
+    # Print table of records where the Type is Unknown (Not TV Shows)
+    if type_unknowns:
+        print("\n\nUnknown Records (Not TV Shows):")
+        if cursor.description:
+            columns = [column[0] for column in cursor.description]
+            column_names = "|".join(columns)
+            print(f"+{'-' * len(column_names.replace('|', ''))}+")
+            print(f"| {column_names} |")
+            print(f"+{'-' * len(column_names.replace('|', ''))}+")
+        for row in type_unknowns:
+            row_values = "|".join([str(value) for value in row])
+            print(f"| {row_values} |")
+        if cursor.description:
+            print(f"+{'-' * len(column_names.replace('|', ''))}+")
+        print("\n")
 
-    # Print bottom separator
-    print(f"+{'-' * len(column_names.replace('|', ''))}+")
+    # Print table of records where the Type is TV Show or Mini Series
+    if type_tv_shows:
+        print("TV Shows and Mini Series:")
+        if cursor.description:
+            columns = [column[0] for column in cursor.description]
+            column_names = "|".join(columns)
+            print(f"+{'-' * len(column_names.replace('|', ''))}+")
+            print(f"| {column_names} |")
+            print(f"+{'-' * len(column_names.replace('|', ''))}+")
+        for row in type_tv_shows:
+            row_values = "|".join([str(value) for value in row])
+            print(f"| {row_values} |")
+        if cursor.description:
+            print(f"+{'-' * len(column_names.replace('|', ''))}+")
+        print("\n")
+
+    # Print table of records with incomplete data
+    if incomplete_records:
+        print("Incomplete Records - try to delete the ID using --delete:")
+        if cursor.description:
+            columns = [column[0] for column in cursor.description]
+            column_names = "|".join(columns)
+            print(f"+{'-' * len(column_names.replace('|', ''))}+")
+            print(f"| {column_names} |")
+            print(f"+{'-' * len(column_names.replace('|', ''))}+")
+        for row in incomplete_records:
+            row_values = "|".join([str(value) for value in row])
+            print(f"| {row_values} |")
+        if cursor.description:
+            print(f"+{'-' * len(column_names.replace('|', ''))}+")
+        print("\n")
+#############################
 
 # Delete series from SQLite database
 def delete_series_from_db(conn, cur, imdb_id):
@@ -421,8 +499,9 @@ def main():
     check_sickchill()
     check_thetvdb()
     conn, cur = setup_database()
-    series_list = imdb_watchlists_init()
-    insert_series_to_db(conn, cur, series_list)
+    series_list, unknown_list = imdb_watchlists_init()
+    insert_series_to_db(conn, cur, series_list)    
+    insert_unique_unknown_ids(conn, cur, unknown_list)
     get_thetvdb_ids(conn, cur)
     sickchill_tvdb_ids = get_sickchill_shows()
     update_added_to_sickchill(conn, cur, sickchill_tvdb_ids)

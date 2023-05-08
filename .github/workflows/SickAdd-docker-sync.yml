@@ -9,15 +9,16 @@ jobs:
   push_to_sickadd_docker:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout Sickadd repository
+    - name: Checkout SickAdd repository
       uses: actions/checkout@v2
       with:
         ref: Stable
+        repository: Modjor/SickAdd
 
     - name: Checkout Sickadd-docker repository
       uses: actions/checkout@v2
       with:
-        repository: <your-github-username>/Sickadd-docker
+        repository: Modjor/Sickadd-docker
         token: ${{ secrets.GH_PAT }}
         path: Sickadd-docker
 
@@ -29,7 +30,7 @@ jobs:
       run: |
         git config user.name "Modjor"
         git config user.email "modjor@badabing.fr"
-        git checkout Master
+        git checkout master
         git add Sickadd.py
-        git commit -m "Update Sickadd.py from Sickadd repository"
+        git commit -m "Update Sickadd.py from SickAdd repository"
         git push

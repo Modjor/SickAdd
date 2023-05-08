@@ -618,6 +618,12 @@ if __name__ == "__main__":
         help='Path to the log file when debug mode is enabled\n'
              'Example: --debug_log_path "/var/log/sickadd.log"'
     )
+    parser.add_argument(
+        "--debug_max_size_mb",
+        type=int,
+        help="Set the maximum size of the debug log file in megabytes"
+    )
+
     args = parser.parse_args()
 
     if args.debug:

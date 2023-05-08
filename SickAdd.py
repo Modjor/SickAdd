@@ -33,6 +33,7 @@ settings = {
     "database_path": "",
     "debug_log_path": "",
     "debug": 1,
+    "debug_max_size_mb": "20"
 }
 
 
@@ -49,12 +50,13 @@ import os
 import html
 import time
 import re
+import gzip
 
-# Debug function
-def debug_log(message):
-    if settings["debug"]:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{timestamp}] {message}")
+def debug_log(message, level=1, force=False):
+    if settings["debug"] >= level or force:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        log_message = f"[{timestamp}] {message}"
+        print(log_message)
         log_file_path = settings["debug_log_path"]
 
         # Set a default log file name if the path is empty
@@ -66,8 +68,22 @@ def debug_log(message):
         if directory_path:
             os.makedirs(directory_path, exist_ok=True)
 
-        with open(log_file_path, "a") as log_file:
-            log_file.write(f"[{timestamp}] {message}\n")
+        # Check the log file size and compress it if necessary
+        try:
+            max_size_bytes = float(settings["debug_max_size_mb"]) * 1024 * 1024
+        except (ValueError, TypeError):
+            max_size_bytes = None
+
+        if max_size_bytes and os.path.exists(log_file_path) and os.path.getsize(log_file_path) > max_size_bytes:
+            backup_file_path = f"sickadd.log_{timestamp}.log"
+            with open(log_file_path, "rb") as input_file, gzip.open(backup_file_path + ".gz", "wb") as output_file:
+                output_file.writelines(input_file)
+            os.remove(log_file_path)
+            with open(log_file_path, "w") as log_file:
+                log_file.write(log_message + "\n")
+        else:
+            with open(log_file_path, "a") as log_file:
+                log_file.write(log_message + "\n")
 
 
 
@@ -420,9 +436,22 @@ def update_added_to_sickchill(conn, cur, sickchill_tvdb_ids):
 
 # Add series to SickChill
 def add_series_to_sickchill(conn, cur):
-    cur.execute("SELECT thetvdb_id, title FROM shows WHERE added_to_sickchill=0 AND show_type=1")
+    # Get shows with null or empty thetvdb_id
+    cur.execute("SELECT imdb_id, title FROM shows WHERE added_to_sickchill=0 AND show_type=1 AND (thetvdb_id IS NULL OR thetvdb_id='')")
+    shows_with_null_thetvdb_id = cur.fetchall()
+    message = f"{len(shows_with_null_thetvdb_id)} TV shows will be skipped due to missing TheTVDB IDs."
+    debug_log(message, force=True)
+    for show in shows_with_null_thetvdb_id:
+        message = f"Missing TheTVDB ID for TV show with IMDB ID: {show[0]} and Title: {show[1]}"
+        debug_log(message, force=True)
+
+    # Get shows to add to SickChill
+    cur.execute("SELECT thetvdb_id, title FROM shows WHERE added_to_sickchill=0 AND show_type=1 AND thetvdb_id IS NOT NULL AND thetvdb_id<>''")
     shows_to_add = cur.fetchall()
     debug_log(f"{len(shows_to_add)} series to add to SickChill")
+
+    added_to_sickchill = False
+
     for show in shows_to_add:
         thetvdb_id, title = show
         debug_log(f"Attempting to add series to SickChill (TheTVDB ID: {thetvdb_id}, Title: {title})")
@@ -433,9 +462,19 @@ def add_series_to_sickchill(conn, cur):
             cur.execute("UPDATE shows SET added_to_sickchill=1, sc_added_date=? WHERE thetvdb_id=?", (datetime.now().strftime("%Y-%m-%d"), thetvdb_id))
             conn.commit()
             debug_log(f"Series added to SickChill (TheTVDB ID: {thetvdb_id}, Title: {title})")
+            added_to_sickchill = True
         else:
             debug_log(f"Unable to add series to SickChill (TheTVDB ID: {thetvdb_id}, Title: {title}) - Response code: {response.status_code}")
 
+    if added_to_sickchill:
+        debug_log("Import to SickChill is complete. SickAdd will now exit.", force=True)
+    else:
+        debug_log("No new TV series to import. SickAdd will now exit", force=True)
+
+
+
+
+# Show db content
 def show_db_content(cursor):
     # Select records where the Type is Unknown (Not TV Shows)
     cursor.execute("SELECT * FROM shows WHERE show_type = 0")

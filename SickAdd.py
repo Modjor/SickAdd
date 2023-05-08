@@ -23,7 +23,6 @@
 # deleting items from the SQLite database
 ###########################################################
 
-
 # Settings
 settings = {
     "watchlist_urls": [

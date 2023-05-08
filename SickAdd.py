@@ -50,7 +50,6 @@ import html
 import time
 import re
 
-
 # Debug function
 def debug_log(message):
     if settings["debug"]:
@@ -69,6 +68,9 @@ def debug_log(message):
 
         with open(log_file_path, "a") as log_file:
             log_file.write(f"[{timestamp}] {message}\n")
+
+
+
 
 # Check if IMDb Watchlists are reachable
 def check_watchlists():
@@ -150,36 +152,52 @@ def setup_database():
     conn = sqlite3.connect(database_path)
     debug_log(f"Connected to database at: {conn}")
     cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS shows (
-            imdb_id TEXT PRIMARY KEY,
-            title TEXT,
-            watchlist_url TEXT,
-            imdb_import_date TEXT,
-            added_to_sickchill INTEGER,
-            thetvdb_id INTEGER,
-            sc_added_date TEXT
+
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='shows'")
+    table_exists = cur.fetchone()
+
+    if table_exists is None:
+        # The "shows" table doesn't exist, create the table with all fields, including "show_type"
+        debug_log("Creating the 'shows' table with all fields")
+        cur.execute(
+            """
+            CREATE TABLE shows (
+                imdb_id TEXT PRIMARY KEY,
+                title TEXT,
+                watchlist_url TEXT,
+                imdb_import_date TEXT,
+                added_to_sickchill INTEGER,
+                thetvdb_id INTEGER,
+                sc_added_date TEXT,
+                show_type INTEGER
+            )
+            """
         )
-        """
-    )
-    conn.commit()
-    ## DB Migration steps for new versions
-    # Add the 'show_type' column if it doesn't exist
+        conn.commit()
+    else:
+        # The "shows" table exists, check if it needs to be upgraded
+        upgrade_database(conn, cur)
+
+    return conn, cur
+    
+########## DB UPGRADE SECTION #######
+# Upgrade the database structure if needed
+def upgrade_database(conn, cur):
     cur.execute("PRAGMA table_info(shows)")
     columns = cur.fetchall()
     column_names = [column[1] for column in columns]
+
+    # Add the 'show_type' column if it doesn't exist
     if "show_type" not in column_names:
+        debug_log("Upgrading the 'shows' table, adding the 'show_type' column")
         cur.execute("ALTER TABLE shows ADD COLUMN show_type INTEGER")
         conn.commit()
-        debug_log("Added new column 'show_type' to the 'shows' table")
 
         # Set all existing show entries 'show_type' to 1
         cur.execute("UPDATE shows SET show_type = 1")
         conn.commit()
-        debug_log("DB Migration - Set all existing show show_type to 1 (TV Shows)")
+        debug_log("DB Upgrade - Set all existing show show_type to 1 (TV Shows)")
 
-    return conn, cur
 
 
 # Retrieve IMDb IDs from a given IMDb watchlist URL
@@ -491,9 +509,15 @@ def delete_series_from_db(conn, cur, imdb_id):
         conn.commit()
         debug_log(f"Series removed from the database (IMDb ID: {imdb_id})")
 
+# Initial db check
+def check_database():
+    conn, cur = setup_database()
+    conn.close()
+
 
 # Main function
 def main():
+    check_database()
     check_watchlists()
     check_sickchill()
     check_thetvdb()

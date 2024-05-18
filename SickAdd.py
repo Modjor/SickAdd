@@ -96,8 +96,12 @@ def check_watchlists():
     # Create a list to store reachable watchlists
     reachable_watchlists = []
 
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
+    }
+
     for url in settings["watchlist_urls"]:
-        response = requests.get(url)
+        response = requests.get(url, headers=headers)
         if response.status_code == 200:
             reachable_watchlists.append(url)
         else:
